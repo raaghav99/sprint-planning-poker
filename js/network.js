@@ -117,15 +117,24 @@ export class PokerNetworkController {
 
     /** Establish real-time WebSocket connection to Durable Object */
     connectWebSocket(roomCode, playerId, displayName) {
+        this._reconnectAttempts = 0;
+        this._roomCode = roomCode;
+        this._playerId = playerId;
+        this._displayName = displayName;
+        this._connectWS();
+    }
+
+    _connectWS() {
         try {
             const wsProtocol = DEFAULT_WORKER_URL.startsWith('https') ? 'wss:' : 'ws:';
             const wsHost = DEFAULT_WORKER_URL.replace(/^https?:\/\//, '');
-            const wsUrl = `${wsProtocol}//${wsHost}/ws?room=${roomCode}&playerId=${playerId}&displayName=${encodeURIComponent(displayName)}`;
+            const wsUrl = `${wsProtocol}//${wsHost}/ws?room=${this._roomCode}&playerId=${this._playerId}&displayName=${encodeURIComponent(this._displayName)}`;
 
             this.socket = new WebSocket(wsUrl);
 
             this.socket.addEventListener('open', () => {
-                console.log('[WebSocket] Connected to Durable Object room:', roomCode);
+                console.log('[WebSocket] Connected to Durable Object room:', this._roomCode);
+                this._reconnectAttempts = 0;
                 this.startPing();
             });
 
@@ -137,8 +146,14 @@ export class PokerNetworkController {
             });
 
             this.socket.addEventListener('close', () => {
-                console.warn('[WebSocket] Closed. Attempting reconnect...');
                 this.stopPing();
+                // Auto-reconnect with exponential backoff (max 30s)
+                if (this._roomCode && this._reconnectAttempts < 10) {
+                    const delay = Math.min(1000 * Math.pow(2, this._reconnectAttempts), 30000);
+                    this._reconnectAttempts++;
+                    console.warn(`[WebSocket] Closed. Reconnecting in ${delay / 1000}s (attempt ${this._reconnectAttempts})...`);
+                    this._reconnectTimer = setTimeout(() => this._connectWS(), delay);
+                }
             });
 
             this.socket.addEventListener('error', (err) => {
@@ -155,13 +170,22 @@ export class PokerNetworkController {
 
         if (event === 'room_state' || event === 'room_updated') {
             const myId = pokerState.get().myPeerId;
+
+            // Determine myVote: use server value if present, null if votes were cleared (reset)
+            let myVote;
+            if (payload.votes && payload.votes[myId] !== undefined) {
+                myVote = payload.votes[myId];
+            } else {
+                myVote = null; // Votes were cleared (reset) or player hasn't voted
+            }
+
             pokerState.set({
                 currentStory: payload.currentStory || pokerState.get().currentStory,
                 deckType: payload.deckType || pokerState.get().deckType,
                 roundStatus: payload.roundStatus || pokerState.get().roundStatus,
                 players: payload.players || pokerState.get().players,
                 votes: payload.votes || pokerState.get().votes,
-                myVote: (payload.votes && payload.votes[myId]) !== undefined ? payload.votes[myId] : pokerState.get().myVote,
+                myVote: myVote,
                 history: payload.history || pokerState.get().history
             });
         }
@@ -237,6 +261,11 @@ export class PokerNetworkController {
     }
 
     disconnect() {
+        this._roomCode = null; // Prevents auto-reconnect
+        if (this._reconnectTimer) {
+            clearTimeout(this._reconnectTimer);
+            this._reconnectTimer = null;
+        }
         this.stopPing();
         if (this.socket) {
             this.socket.close();

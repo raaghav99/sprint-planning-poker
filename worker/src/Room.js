@@ -3,7 +3,7 @@
  * Single authoritative source-of-truth in-memory room instance.
  */
 
-import { sendJSON, broadcastJSON } from './websocket.js';
+import { sendJSON } from './websocket.js';
 import { CORS_HEADERS, ROOM_TIMEOUT_MS, MAX_PLAYERS } from './constants.js';
 
 export class PokerRoom {
@@ -93,9 +93,17 @@ export class PokerRoom {
     }
 
     async handleJoin(request) {
+        // Validate room was created before allowing joins
+        if (!this.roomCode) {
+            return new Response(JSON.stringify({ error: 'Room does not exist' }), {
+                status: 404,
+                headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+            });
+        }
+
         const body = await request.json();
         const playerId = body.playerId;
-        const displayName = body.displayName.trim();
+        const displayName = (body.displayName || 'Guest').trim();
 
         if (this.players.size >= MAX_PLAYERS) {
             return new Response(JSON.stringify({ error: 'Room is full' }), {
@@ -122,8 +130,21 @@ export class PokerRoom {
     }
 
     async handleVote(request) {
+        if (!this.roomCode) {
+            return new Response(JSON.stringify({ error: 'Room does not exist' }), {
+                status: 404, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+            });
+        }
+
         const body = await request.json();
         const { playerId, vote } = body;
+
+        // Only registered players can vote
+        if (!this.players.has(playerId)) {
+            return new Response(JSON.stringify({ error: 'Player not in this room' }), {
+                status: 403, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+            });
+        }
 
         if (vote === null || vote === undefined) {
             this.votes.delete(playerId);
@@ -192,14 +213,18 @@ export class PokerRoom {
 
         serverWS.accept();
 
-        // Register player and socket connection
+        // Register player and socket connection (only if room exists or player is host)
         if (!this.players.has(playerId)) {
             this.players.set(playerId, {
                 id: playerId,
                 displayName,
-                role: this.players.size === 0 ? 'HOST' : 'VOTER',
+                role: (this.players.size === 0 && !this.hostId) ? 'HOST' : 'VOTER',
                 joinedAt: Date.now()
             });
+            // If this is the first player and no host set, make them host
+            if (!this.hostId) {
+                this.hostId = playerId;
+            }
         }
 
         this.sockets.set(playerId, serverWS);

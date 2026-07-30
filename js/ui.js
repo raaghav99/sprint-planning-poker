@@ -140,7 +140,7 @@ export class PokerUIController {
         // Exit Room
         this.btnExitRoom.addEventListener('click', () => {
             if (confirm('Are you sure you want to exit the room?')) {
-                this.network.stopPolling();
+                this.network.disconnect();
                 pokerState.reset();
                 window.location.search = '';
             }

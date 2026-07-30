@@ -5,6 +5,7 @@
 import { pokerState, DECKS } from './state.js';
 import { PokerNetworkController } from './network.js';
 import { PokerEngine } from './engine.js';
+import { showQRCodeModal } from './qrcode.js';
 
 export class PokerUIController {
     constructor() {
@@ -130,7 +131,7 @@ export class PokerUIController {
             const code = pokerState.get().roomCode;
             if (!code) return;
             const url = `${window.location.origin}${window.location.pathname}?room=${code}`;
-            alert(`📱 Room Link:\n${url}\n\nShare code: ${code}`);
+            showQRCodeModal(url, code);
         });
 
         // Exit Room

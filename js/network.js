@@ -250,9 +250,11 @@ export class PokerNetworkController {
 
     /* ---- Cloud Storage Transport Helpers (100% Free HTTPS, Global Cross-Device Sync) ---- */
     async _saveRoomToCloud(roomCode, data) {
-        const key = this.storageKeyPrefix + roomCode;
+        const topic = `sprint_poker_room_${roomCode.toUpperCase()}`;
+        const payload = JSON.stringify(data);
+
         try {
-            localStorage.setItem(key, JSON.stringify(data));
+            localStorage.setItem(this.storageKeyPrefix + roomCode, payload);
             if (window.BroadcastChannel) {
                 const bc = new BroadcastChannel('sprint_poker_channel');
                 bc.postMessage({ roomCode, data });
@@ -260,50 +262,38 @@ export class PokerNetworkController {
             }
         } catch (e) {}
 
-        const roomObjName = `sprint_poker_${roomCode.toUpperCase()}`;
-
-        // Global Cloud Sync via HTTPS REST API
+        // Global Cloud Sync via ntfy pub/sub relay
         try {
-            const searchRes = await fetch(`https://api.restful-api.dev/objects?name=${roomObjName}`);
-            let existingId = null;
-            if (searchRes.ok) {
-                const items = await searchRes.json();
-                if (Array.isArray(items) && items.length > 0) {
-                    existingId = items[items.length - 1].id;
-                }
-            }
-
-            if (existingId) {
-                await fetch(`https://api.restful-api.dev/objects/${existingId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: roomObjName, data: data })
-                });
-            } else {
-                await fetch('https://api.restful-api.dev/objects', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: roomObjName, data: data })
-                });
-            }
+            await fetch(`https://ntfy.sh/${topic}`, {
+                method: 'POST',
+                body: payload
+            });
         } catch (err) {
             console.warn('[Cloud Save Error]:', err);
         }
     }
 
     async _fetchRoomFromCloud(roomCode) {
-        const roomObjName = `sprint_poker_${roomCode.toUpperCase()}`;
+        const topic = `sprint_poker_room_${roomCode.toUpperCase()}`;
 
-        // 1. Try global cloud endpoint
+        // 1. Fetch latest room state from global ntfy cloud relay
         try {
-            const res = await fetch(`https://api.restful-api.dev/objects?name=${roomObjName}&_t=${Date.now()}`);
+            const res = await fetch(`https://ntfy.sh/${topic}/json?poll=1&_t=${Date.now()}`);
             if (res.ok) {
-                const items = await res.json();
-                if (Array.isArray(items) && items.length > 0) {
-                    const latest = items[items.length - 1];
-                    if (latest && latest.data && latest.data.roomCode) {
-                        localStorage.setItem(this.storageKeyPrefix + roomCode, JSON.stringify(latest.data));
-                        return latest.data;
+                const text = await res.text();
+                const lines = text.trim().split('\n').filter(Boolean);
+                if (lines.length > 0) {
+                    for (let i = lines.length - 1; i >= 0; i--) {
+                        try {
+                            const parsedMsg = JSON.parse(lines[i]);
+                            if (parsedMsg && parsedMsg.message) {
+                                const roomData = JSON.parse(parsedMsg.message);
+                                if (roomData && roomData.roomCode) {
+                                    localStorage.setItem(this.storageKeyPrefix + roomCode, JSON.stringify(roomData));
+                                    return roomData;
+                                }
+                            }
+                        } catch (e) {}
                     }
                 }
             }

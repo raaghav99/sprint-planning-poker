@@ -34,13 +34,7 @@ A fast, modern, and beautiful **Sprint Planning Poker** application designed for
    git push -u origin main
    ```
 3. In your GitHub repository settings, go to **Pages** -> Select `main` branch -> Click **Save**.
-4. Your site will be live at `https://YOUR_USERNAME.github.io/sprint-planning-poker/`!
-
-### Deploying to Vercel (100% Free)
-
-1. Push code to GitHub.
-2. Go to [Vercel.com](https://vercel.com) and click **Add New Project**.
-3. Import `sprint-planning-poker` and click **Deploy**.
+4. Your site is live at `https://YOUR_USERNAME.github.io/sprint-planning-poker/`!
 
 ---
 

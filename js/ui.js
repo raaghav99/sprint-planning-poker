@@ -128,8 +128,11 @@ export class PokerUIController {
 
         // QR Code Generator
         this.btnQRCode.addEventListener('click', () => {
-            const code = pokerState.get().roomCode;
-            if (!code) return;
+            const code = pokerState.get().roomCode || this.inputRoomCode.value.trim().toUpperCase();
+            if (!code) {
+                this._showNotification('Please enter or create a Room Code first!', 'warning');
+                return;
+            }
             const url = `${window.location.origin}${window.location.pathname}?room=${code}`;
             showQRCodeModal(url, code);
         });

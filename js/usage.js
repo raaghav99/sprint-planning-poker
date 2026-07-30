@@ -1,12 +1,11 @@
 /**
  * Sprint Planning Poker - API Usage Tracker
- * Tracks daily request count per device to monitor Cloudflare free tier usage.
- * Cloudflare Workers Free: 100,000 requests/day (resets midnight UTC)
- * Per-device soft limit: 2,000 requests/day (safe budget for 20-member team)
+ * Tracks daily request count to monitor Cloudflare free tier usage.
+ * Cloudflare Workers Free Tier Budget: 100,000 requests/day (resets midnight UTC)
  */
 
 const STORAGE_KEY = 'sprint_poker_usage';
-const DAILY_BUDGET = 2000; // Per-device soft limit
+const DAILY_BUDGET = 100000; // Cloudflare Free Tier Daily Budget
 
 function _getTodayKey() {
     const d = new Date();
@@ -39,10 +38,12 @@ export function incrementUsage(amount = 1) {
 
 export function getUsage() {
     const data = _loadUsage();
+    const exactPct = (data.count / DAILY_BUDGET) * 100;
+    const roundedPct = exactPct < 0.1 && data.count > 0 ? 0.1 : Math.round(exactPct * 10) / 10;
     return {
         count: data.count,
         budget: DAILY_BUDGET,
-        percent: Math.min(100, Math.round((data.count / DAILY_BUDGET) * 100)),
+        percent: Math.min(100, roundedPct),
         remaining: Math.max(0, DAILY_BUDGET - data.count)
     };
 }
@@ -81,19 +82,26 @@ function _updateWidget() {
         circle.style.stroke = color;
     }
 
-    // Update text
+    // Update text in ring
     const label = widget.querySelector('.usage-pct-label');
-    if (label) label.textContent = `${100 - percent}%`;
+    if (label) {
+        const remPct = Math.max(0, Math.round((100 - percent) * 10) / 10);
+        label.textContent = remPct >= 99.9 ? '100%' : `${remPct}%`;
+    }
 
     // Update tooltip
     const tip = widget.querySelector('.usage-tooltip');
     if (tip) {
+        const countFmt = count.toLocaleString();
+        const budgetFmt = budget.toLocaleString();
+        const remFmt = remaining.toLocaleString();
+
         tip.innerHTML = `
-            <div style="font-weight:700; margin-bottom:4px; font-size:0.8rem;">⚡ API Usage Today</div>
-            <div style="color:${color}; font-weight:700; font-size:1.1rem; margin-bottom:2px;">${percent}% used</div>
-            <div style="color:#94a3b8; font-size:0.75rem; margin-bottom:6px;">${count} / ${budget} requests</div>
-            <div style="border-top:1px solid rgba(255,255,255,0.1); padding-top:6px; color:#94a3b8; font-size:0.72rem;">
-                🔄 Resets in <strong style="color:#e2e8f0;">${resetIn}</strong>
+            <div style="font-weight:700; margin-bottom:4px; font-size:0.82rem; color:#f8fafc;">⚡ Cloudflare 100K Daily Quota</div>
+            <div style="color:${color}; font-weight:700; font-size:1.05rem; margin-bottom:4px;">${countFmt} / ${budgetFmt}</div>
+            <div style="color:#94a3b8; font-size:0.75rem; margin-bottom:4px;">Used: <strong style="color:#e2e8f0;">${percent}%</strong> | Remaining: <strong style="color:#10b981;">${remFmt}</strong></div>
+            <div style="border-top:1px solid rgba(255,255,255,0.1); padding-top:6px; margin-top:4px; color:#94a3b8; font-size:0.72rem;">
+                🔄 Resets in <strong style="color:#38bdf8;">${resetIn}</strong> (Midnight UTC)
             </div>
         `;
     }
@@ -106,7 +114,7 @@ export function initUsageWidget() {
     const circumference = 2 * Math.PI * 14;
 
     widget.innerHTML = `
-        <div class="usage-ring-wrap" title="API Usage">
+        <div class="usage-ring-wrap" title="Cloudflare 100,000 Requests Daily Limit">
             <svg width="36" height="36" viewBox="0 0 36 36">
                 <circle cx="18" cy="18" r="14"
                     fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3.5"/>
@@ -118,13 +126,13 @@ export function initUsageWidget() {
                     transform="rotate(-90 18 18)"
                     style="transition: stroke-dashoffset 0.5s ease, stroke 0.4s ease;"/>
             </svg>
-            <span class="usage-pct-label">—</span>
+            <span class="usage-pct-label">100%</span>
         </div>
-        <div class="usage-tooltip">Loading...</div>
+        <div class="usage-tooltip">Loading Cloudflare Quota...</div>
     `;
 
     _updateWidget();
 
-    // Refresh the reset countdown every minute
+    // Refresh reset countdown every minute
     setInterval(_updateWidget, 60_000);
 }

@@ -43,7 +43,7 @@ export class PokerNetworkController {
             updatedAt: Date.now()
         };
 
-        this._saveRoomToCloud(this.roomCode, initialState);
+        await this._saveRoomToCloud(this.roomCode, initialState);
 
         pokerState.set({
             role: 'HOST',
@@ -248,7 +248,7 @@ export class PokerNetworkController {
         }
     }
 
-    /* ---- Cloud Storage Transport Helpers (100% Free HTTPS, No WebRTC, Global Cross-Device Sync) ---- */
+    /* ---- Cloud Storage Transport Helpers (100% Free HTTPS, Global Cross-Device Sync) ---- */
     async _saveRoomToCloud(roomCode, data) {
         const key = this.storageKeyPrefix + roomCode;
         try {
@@ -260,34 +260,58 @@ export class PokerNetworkController {
             }
         } catch (e) {}
 
-        // Global Cloud Sync across all devices (Desktop, Mobile, Corporate Laptops)
+        const roomObjName = `sprint_poker_${roomCode.toUpperCase()}`;
+
+        // Global Cloud Sync via HTTPS REST API
         try {
-            await fetch(`https://kvdb.io/sprint_poker_app_2026_v1/${roomCode}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            });
+            const searchRes = await fetch(`https://api.restful-api.dev/objects?name=${roomObjName}`);
+            let existingId = null;
+            if (searchRes.ok) {
+                const items = await searchRes.json();
+                if (Array.isArray(items) && items.length > 0) {
+                    existingId = items[items.length - 1].id;
+                }
+            }
+
+            if (existingId) {
+                await fetch(`https://api.restful-api.dev/objects/${existingId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: roomObjName, data: data })
+                });
+            } else {
+                await fetch('https://api.restful-api.dev/objects', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: roomObjName, data: data })
+                });
+            }
         } catch (err) {
             console.warn('[Cloud Save Error]:', err);
         }
     }
 
     async _fetchRoomFromCloud(roomCode) {
-        // First try global cloud endpoint
+        const roomObjName = `sprint_poker_${roomCode.toUpperCase()}`;
+
+        // 1. Try global cloud endpoint
         try {
-            const res = await fetch(`https://kvdb.io/sprint_poker_app_2026_v1/${roomCode}?t=${Date.now()}`);
+            const res = await fetch(`https://api.restful-api.dev/objects?name=${roomObjName}&_t=${Date.now()}`);
             if (res.ok) {
-                const data = await res.json();
-                if (data && data.roomCode) {
-                    localStorage.setItem(this.storageKeyPrefix + roomCode, JSON.stringify(data));
-                    return data;
+                const items = await res.json();
+                if (Array.isArray(items) && items.length > 0) {
+                    const latest = items[items.length - 1];
+                    if (latest && latest.data && latest.data.roomCode) {
+                        localStorage.setItem(this.storageKeyPrefix + roomCode, JSON.stringify(latest.data));
+                        return latest.data;
+                    }
                 }
             }
         } catch (err) {
             console.warn('[Cloud Fetch Error]:', err);
         }
 
-        // Fallback to local storage
+        // 2. Fallback to local storage
         try {
             const raw = localStorage.getItem(this.storageKeyPrefix + roomCode);
             if (raw) return JSON.parse(raw);

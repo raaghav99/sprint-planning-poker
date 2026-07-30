@@ -1,0 +1,22 @@
+{
+  "name": "sprint-poker-worker",
+  "version": "2.0.0",
+  "description": "Cloudflare Workers + Durable Objects Backend for Sprint Planning Poker",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "keywords": [
+    "cloudflare",
+    "durable-objects",
+    "planning-poker",
+    "websockets"
+  ],
+  "author": "raaghav99",
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240405.0",
+    "wrangler": "^3.50.0"
+  }
+}

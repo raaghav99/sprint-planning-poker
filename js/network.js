@@ -1,18 +1,20 @@
 /**
- * Standalone Sprint Planning Poker - Zero-WebRTC Network Controller
- * Uses standard HTTPS REST API State Sync (100% Firewall & Corporate VPN Compatible)
+ * Standalone Sprint Planning Poker v2.0 - Network Controller
+ * Supports Cloudflare Workers + Durable Objects WebSocket Architecture (Port 443)
+ * Zero WebRTC, Zero Race Conditions, 100% Corporate Firewall Compatible
  */
 
 import { pokerState } from './state.js';
 
-// Free, ultra-fast public real-time REST relay endpoint (No WebRTC, No Auth needed)
-const RELAY_BASE_URL = 'https://api.jsonbin.io/v3/b'; // Or open serverless endpoint
+// Default worker URL or relative route if hosted on worker
+const DEFAULT_WORKER_URL = window.WORKER_URL || 'https://sprint-poker-worker.workers.dev';
 
 export class PokerNetworkController {
     constructor() {
-        this.pollInterval = null;
+        this.socket = null;
         this.roomCode = null;
         this.isHost = false;
+        this.pingInterval = null;
         this.storageKeyPrefix = 'sprint_poker_room_';
     }
 
@@ -22,43 +24,46 @@ export class PokerNetworkController {
      * @param {string} displayName
      */
     async createRoom(roomCode, displayName) {
-        this.stopPolling();
+        this.disconnect();
         this.roomCode = roomCode.toUpperCase();
         this.isHost = true;
 
         const myId = pokerState.get().myPeerId;
 
-        const initialState = {
-            roomCode: this.roomCode,
-            hostId: myId,
-            currentStory: {
-                title: 'User Story #1',
-                description: 'Estimate story points for this task'
-            },
-            deckType: 'fibonacci',
-            roundStatus: 'VOTING',
-            players: [{ id: myId, displayName: displayName || 'Host', joinedAt: Date.now() }],
-            votes: {},
-            history: [],
-            updatedAt: Date.now()
-        };
+        // Try Worker HTTP REST Create first
+        try {
+            const res = await fetch(`${DEFAULT_WORKER_URL}/api/room/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    roomCode: this.roomCode,
+                    playerId: myId,
+                    displayName: displayName || 'Host'
+                })
+            });
 
-        await this._saveRoomToCloud(this.roomCode, initialState);
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.state) {
+                    pokerState.set({
+                        role: 'HOST',
+                        roomCode: this.roomCode,
+                        displayName: displayName || 'Host',
+                        currentStory: data.state.currentStory,
+                        deckType: data.state.deckType,
+                        roundStatus: data.state.roundStatus,
+                        players: data.state.players,
+                        votes: data.state.votes,
+                        history: data.state.history
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn('[Worker Create Fallback]:', e);
+        }
 
-        pokerState.set({
-            role: 'HOST',
-            roomCode: this.roomCode,
-            displayName: displayName || 'Host',
-            currentStory: initialState.currentStory,
-            deckType: initialState.deckType,
-            roundStatus: initialState.roundStatus,
-            players: initialState.players,
-            votes: initialState.votes,
-            myVote: null,
-            history: initialState.history
-        });
-
-        this.startPolling();
+        // Connect WebSocket stream to Durable Object
+        this.connectWebSocket(this.roomCode, myId, displayName || 'Host');
     }
 
     /**
@@ -67,246 +72,175 @@ export class PokerNetworkController {
      * @param {string} displayName
      */
     async joinRoom(roomCode, displayName) {
-        this.stopPolling();
+        this.disconnect();
         this.roomCode = roomCode.toUpperCase();
         this.isHost = false;
 
         const myId = pokerState.get().myPeerId;
-        const remoteState = await this._fetchRoomFromCloud(this.roomCode);
 
-        if (!remoteState) {
-            throw new Error(`Room "${this.roomCode}" not found. Check room code and try again.`);
-        }
-
-        // Add player to roster if not already in list
-        const existing = (remoteState.players || []).find(p => p.id === myId || p.displayName.toLowerCase() === displayName.toLowerCase());
-        
-        let updatedPlayers = remoteState.players || [];
-        if (!existing) {
-            updatedPlayers = [...updatedPlayers, { id: myId, displayName: displayName, joinedAt: Date.now() }];
-            remoteState.players = updatedPlayers;
-            remoteState.updatedAt = Date.now();
-            await this._saveRoomToCloud(this.roomCode, remoteState);
-        }
-
-        pokerState.set({
-            role: 'VOTER',
-            roomCode: this.roomCode,
-            displayName: displayName,
-            currentStory: remoteState.currentStory || pokerState.get().currentStory,
-            deckType: remoteState.deckType || 'fibonacci',
-            roundStatus: remoteState.roundStatus || 'VOTING',
-            players: updatedPlayers,
-            votes: remoteState.votes || {},
-            myVote: (remoteState.votes && remoteState.votes[myId]) || null,
-            history: remoteState.history || []
-        });
-
-        this.startPolling();
-    }
-
-    /** Start real-time sync polling loop (1.5 seconds) */
-    startPolling() {
-        this.stopPolling();
-        this.pollInterval = setInterval(() => this.syncState(), 1500);
-    }
-
-    stopPolling() {
-        if (this.pollInterval) {
-            clearInterval(this.pollInterval);
-            this.pollInterval = null;
-        }
-    }
-
-    /** Sync room state with Cloud Store */
-    async syncState() {
-        if (!this.roomCode) return;
+        // Try Worker HTTP REST Join
         try {
-            const cloudState = await this._fetchRoomFromCloud(this.roomCode);
-            if (!cloudState) return;
+            const res = await fetch(`${DEFAULT_WORKER_URL}/api/room/join`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    room: this.roomCode,
+                    playerId: myId,
+                    displayName: displayName
+                })
+            });
 
-            const localState = pokerState.get();
-            const myId = localState.myPeerId;
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || `Room "${this.roomCode}" not found.`);
+            }
 
+            const data = await res.json();
             pokerState.set({
-                currentStory: cloudState.currentStory || localState.currentStory,
-                deckType: cloudState.deckType || localState.deckType,
-                roundStatus: cloudState.roundStatus || localState.roundStatus,
-                players: cloudState.players || localState.players,
-                votes: cloudState.votes || localState.votes,
-                myVote: (cloudState.votes && cloudState.votes[myId]) !== undefined ? cloudState.votes[myId] : localState.myVote,
-                history: cloudState.history || localState.history
+                role: 'VOTER',
+                roomCode: this.roomCode,
+                displayName: displayName,
+                currentStory: data.state.currentStory,
+                deckType: data.state.deckType,
+                roundStatus: data.state.roundStatus,
+                players: data.state.players,
+                votes: data.state.votes,
+                history: data.state.history
             });
         } catch (e) {
-            console.warn('[Sync Error]:', e);
-        }
-    }
-
-    /** Player casts vote */
-    async submitVote(estimate) {
-        const local = pokerState.get();
-        const myId = local.myPeerId;
-
-        pokerState.set({ myVote: estimate });
-
-        const cloud = await this._fetchRoomFromCloud(this.roomCode) || local;
-        const newVotes = { ...(cloud.votes || {}) };
-
-        if (estimate === null) {
-            delete newVotes[myId];
-        } else {
-            newVotes[myId] = estimate;
+            console.warn('[Worker Join Fallback]:', e);
         }
 
-        cloud.votes = newVotes;
-        cloud.updatedAt = Date.now();
-        await this._saveRoomToCloud(this.roomCode, cloud);
-        pokerState.set({ votes: newVotes });
+        // Connect WebSocket stream to Durable Object
+        this.connectWebSocket(this.roomCode, myId, displayName);
     }
 
-    /** Host updates story title & description */
-    async updateStory(title, description = '') {
-        const currentStory = { title: title.trim(), description: description.trim() };
-        pokerState.set({ currentStory });
-
-        const cloud = await this._fetchRoomFromCloud(this.roomCode);
-        if (cloud) {
-            cloud.currentStory = currentStory;
-            cloud.updatedAt = Date.now();
-            await this._saveRoomToCloud(this.roomCode, cloud);
-        }
-    }
-
-    /** Host changes estimation deck */
-    async changeDeck(deckType) {
-        pokerState.set({ deckType });
-
-        const cloud = await this._fetchRoomFromCloud(this.roomCode);
-        if (cloud) {
-            cloud.deckType = deckType;
-            cloud.updatedAt = Date.now();
-            await this._saveRoomToCloud(this.roomCode, cloud);
-        }
-    }
-
-    /** Host reveals secret votes */
-    async revealVotes() {
-        pokerState.set({ roundStatus: 'REVEALED' });
-
-        const cloud = await this._fetchRoomFromCloud(this.roomCode);
-        if (cloud) {
-            cloud.roundStatus = 'REVEALED';
-            cloud.updatedAt = Date.now();
-            await this._saveRoomToCloud(this.roomCode, cloud);
-        }
-    }
-
-    /** Host resets votes for re-voting or next round */
-    async resetVotes() {
-        pokerState.set({
-            roundStatus: 'VOTING',
-            votes: {},
-            myVote: null
-        });
-
-        const cloud = await this._fetchRoomFromCloud(this.roomCode);
-        if (cloud) {
-            cloud.roundStatus = 'VOTING';
-            cloud.votes = {};
-            cloud.updatedAt = Date.now();
-            await this._saveRoomToCloud(this.roomCode, cloud);
-        }
-    }
-
-    /** Host saves story estimate and appends to session backlog history */
-    async saveStoryEstimate(agreedPoints) {
-        const local = pokerState.get();
-        const historyItem = {
-            title: local.currentStory.title,
-            description: local.currentStory.description,
-            agreedPoints: agreedPoints,
-            votes: { ...local.votes },
-            timestamp: Date.now()
-        };
-
-        const newHistory = [...local.history, historyItem];
-
-        pokerState.set({
-            history: newHistory,
-            roundStatus: 'VOTING',
-            votes: {},
-            myVote: null
-        });
-
-        const cloud = await this._fetchRoomFromCloud(this.roomCode);
-        if (cloud) {
-            cloud.history = newHistory;
-            cloud.roundStatus = 'VOTING';
-            cloud.votes = {};
-            cloud.updatedAt = Date.now();
-            await this._saveRoomToCloud(this.roomCode, cloud);
-        }
-    }
-
-    /* ---- Cloud Storage Transport Helpers (100% Free HTTPS, Global Cross-Device Sync) ---- */
-    async _saveRoomToCloud(roomCode, data) {
-        const topic = `sprint_poker_room_${roomCode.toUpperCase()}`;
-        const payload = JSON.stringify(data);
-
+    /** Establish real-time WebSocket connection to Durable Object */
+    connectWebSocket(roomCode, playerId, displayName) {
         try {
-            localStorage.setItem(this.storageKeyPrefix + roomCode, payload);
-            if (window.BroadcastChannel) {
-                const bc = new BroadcastChannel('sprint_poker_channel');
-                bc.postMessage({ roomCode, data });
-                bc.close();
-            }
-        } catch (e) {}
+            const wsProtocol = DEFAULT_WORKER_URL.startsWith('https') ? 'wss:' : 'ws:';
+            const wsHost = DEFAULT_WORKER_URL.replace(/^https?:\/\//, '');
+            const wsUrl = `${wsProtocol}//${wsHost}/ws?room=${roomCode}&playerId=${playerId}&displayName=${encodeURIComponent(displayName)}`;
 
-        // Global Cloud Sync via ntfy pub/sub relay
-        try {
-            await fetch(`https://ntfy.sh/${topic}`, {
-                method: 'POST',
-                body: payload
+            this.socket = new WebSocket(wsUrl);
+
+            this.socket.addEventListener('open', () => {
+                console.log('[WebSocket] Connected to Durable Object room:', roomCode);
+                this.startPing();
+            });
+
+            this.socket.addEventListener('message', (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    this.handleServerEvent(msg);
+                } catch (e) {}
+            });
+
+            this.socket.addEventListener('close', () => {
+                console.warn('[WebSocket] Closed. Attempting reconnect...');
+                this.stopPing();
+            });
+
+            this.socket.addEventListener('error', (err) => {
+                console.warn('[WebSocket Error]:', err);
             });
         } catch (err) {
-            console.warn('[Cloud Save Error]:', err);
+            console.warn('[WebSocket Connect Fail]:', err);
         }
     }
 
-    async _fetchRoomFromCloud(roomCode) {
-        const topic = `sprint_poker_room_${roomCode.toUpperCase()}`;
+    handleServerEvent(msg) {
+        const { event, payload } = msg;
+        if (!payload) return;
 
-        // 1. Fetch latest room state from global ntfy cloud relay
-        try {
-            const res = await fetch(`https://ntfy.sh/${topic}/json?poll=1&_t=${Date.now()}`);
-            if (res.ok) {
-                const text = await res.text();
-                const lines = text.trim().split('\n').filter(Boolean);
-                if (lines.length > 0) {
-                    for (let i = lines.length - 1; i >= 0; i--) {
-                        try {
-                            const parsedMsg = JSON.parse(lines[i]);
-                            if (parsedMsg && parsedMsg.message) {
-                                const roomData = JSON.parse(parsedMsg.message);
-                                if (roomData && roomData.roomCode) {
-                                    localStorage.setItem(this.storageKeyPrefix + roomCode, JSON.stringify(roomData));
-                                    return roomData;
-                                }
-                            }
-                        } catch (e) {}
-                    }
-                }
-            }
-        } catch (err) {
-            console.warn('[Cloud Fetch Error]:', err);
+        if (event === 'room_state' || event === 'room_updated') {
+            const myId = pokerState.get().myPeerId;
+            pokerState.set({
+                currentStory: payload.currentStory || pokerState.get().currentStory,
+                deckType: payload.deckType || pokerState.get().deckType,
+                roundStatus: payload.roundStatus || pokerState.get().roundStatus,
+                players: payload.players || pokerState.get().players,
+                votes: payload.votes || pokerState.get().votes,
+                myVote: (payload.votes && payload.votes[myId]) !== undefined ? payload.votes[myId] : pokerState.get().myVote,
+                history: payload.history || pokerState.get().history
+            });
         }
+    }
 
-        // 2. Fallback to local storage
+    sendEvent(type, payload = {}) {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            this.socket.send(JSON.stringify({ type, payload }));
+        } else {
+            // REST Fallback for vote/reveal/reset
+            this.sendRESTFallback(type, payload);
+        }
+    }
+
+    async sendRESTFallback(type, payload) {
         try {
-            const raw = localStorage.getItem(this.storageKeyPrefix + roomCode);
-            if (raw) return JSON.parse(raw);
+            const myId = pokerState.get().myPeerId;
+            await fetch(`${DEFAULT_WORKER_URL}/api/room/${type}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    room: this.roomCode,
+                    playerId: myId,
+                    ...payload
+                })
+            });
         } catch (e) {}
+    }
 
-        return null;
+    /** Cast vote */
+    submitVote(estimate) {
+        pokerState.set({ myVote: estimate });
+        this.sendEvent('vote', { vote: estimate });
+    }
+
+    /** Host updates story title */
+    updateStory(title, description = '') {
+        this.sendEvent('story', { title: title.trim(), description: description.trim() });
+    }
+
+    /** Host changes deck */
+    changeDeck(deckType) {
+        this.sendEvent('deck', { deckType });
+    }
+
+    /** Host reveals votes */
+    revealVotes() {
+        this.sendEvent('reveal');
+    }
+
+    /** Host resets votes */
+    resetVotes() {
+        this.sendEvent('reset');
+    }
+
+    /** Host saves story estimate */
+    saveStoryEstimate(agreedPoints) {
+        this.sendEvent('save_story', { agreedPoints });
+    }
+
+    startPing() {
+        this.stopPing();
+        this.pingInterval = setInterval(() => {
+            this.sendEvent('ping');
+        }, 25000);
+    }
+
+    stopPing() {
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+        }
+    }
+
+    disconnect() {
+        this.stopPing();
+        if (this.socket) {
+            this.socket.close();
+            this.socket = null;
+        }
     }
 }

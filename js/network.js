@@ -248,27 +248,51 @@ export class PokerNetworkController {
         }
     }
 
-    /* ---- Cloud Storage Transport Helpers (100% Free HTTPS) ---- */
+    /* ---- Cloud Storage Transport Helpers (100% Free HTTPS, No WebRTC, Global Cross-Device Sync) ---- */
     async _saveRoomToCloud(roomCode, data) {
+        const key = this.storageKeyPrefix + roomCode;
         try {
-            const key = this.storageKeyPrefix + roomCode;
             localStorage.setItem(key, JSON.stringify(data));
-            
-            // Shared cross-tab & cross-window broadcast channel
             if (window.BroadcastChannel) {
                 const bc = new BroadcastChannel('sprint_poker_channel');
                 bc.postMessage({ roomCode, data });
                 bc.close();
             }
         } catch (e) {}
+
+        // Global Cloud Sync across all devices (Desktop, Mobile, Corporate Laptops)
+        try {
+            await fetch(`https://kvdb.io/sprint_poker_app_2026_v1/${roomCode}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+        } catch (err) {
+            console.warn('[Cloud Save Error]:', err);
+        }
     }
 
     async _fetchRoomFromCloud(roomCode) {
+        // First try global cloud endpoint
         try {
-            const key = this.storageKeyPrefix + roomCode;
-            const raw = localStorage.getItem(key);
+            const res = await fetch(`https://kvdb.io/sprint_poker_app_2026_v1/${roomCode}?t=${Date.now()}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.roomCode) {
+                    localStorage.setItem(this.storageKeyPrefix + roomCode, JSON.stringify(data));
+                    return data;
+                }
+            }
+        } catch (err) {
+            console.warn('[Cloud Fetch Error]:', err);
+        }
+
+        // Fallback to local storage
+        try {
+            const raw = localStorage.getItem(this.storageKeyPrefix + roomCode);
             if (raw) return JSON.parse(raw);
         } catch (e) {}
+
         return null;
     }
 }

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sprint Planning Poker – Agile Estimation Tool</title>
+    <meta name="description" content="Free, zero-WebRTC Agile Sprint Planning Poker tool for remote development teams. Instant link sharing, 20+ member support, 3D card flip reveal, Fibonacci decks, and CSV report export.">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="poker-app">
+        <!-- Header -->
+        <header class="app-header">
+            <a href="index.html" class="brand-logo">
+                <span>🃏</span>
+                <span>Sprint Planning Poker</span>
+            </a>
+
+            <div class="room-badge-group">
+                <div class="room-badge">
+                    <span>ROOM:</span>
+                    <strong id="header-room-code">------</strong>
+                    <span id="header-role-badge" class="player-role-tag" style="display:none; margin-left:6px;">HOST</span>
+                </div>
+                <button id="btn-share-link" class="btn btn-secondary" style="padding:6px 14px; font-size:0.85rem;" title="Copy Shareable URL Link">
+                    🔗 Share Link
+                </button>
+                <button id="btn-qr-code" class="btn btn-secondary" style="padding:6px 14px; font-size:0.85rem;" title="Show QR Code">
+                    📱 QR Code
+                </button>
+                <button id="btn-exit-room" class="btn btn-danger" style="padding:6px 14px; font-size:0.85rem; display:none;" title="Exit Room">
+                    🚪 Exit
+                </button>
+            </div>
+        </header>
+
+        <!-- VIEW 1: LOBBY (Host / Join) -->
+        <main id="view-lobby" class="view-panel active">
+            <div class="lobby-card glass-panel">
+                <div style="font-size: 3rem; margin-bottom: 8px;">🃏</div>
+                <h1 style="font-size: 1.8rem; margin-bottom: 6px;">Sprint Planning Poker</h1>
+                <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:24px;">
+                    Fast Agile Estimation • 100% Free & Corporate Firewall Compatible (Supports 20+ Members)
+                </p>
+
+                <div class="lobby-tabs">
+                    <button id="tab-join" class="tab-btn active">Join Session</button>
+                    <button id="tab-create" class="tab-btn">Host Session</button>
+                </div>
+
+                <!-- Join Section -->
+                <div id="section-join">
+                    <div class="input-group">
+                        <label class="input-label" for="input-room-code">Room Code</label>
+                        <input type="text" id="input-room-code" class="input-control" placeholder="e.g. A7B9K2" maxlength="6" style="text-transform: uppercase; text-align:center; font-weight:700; letter-spacing:2px;">
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label" for="input-player-name">Your Display Name</label>
+                        <input type="text" id="input-player-name" class="input-control" placeholder="e.g. Alex (Backend)" maxlength="20">
+                    </div>
+
+                    <button id="btn-join-room" class="btn btn-primary" style="width: 100%; margin-top: 12px;">
+                        Join Session &rarr;
+                    </button>
+                </div>
+
+                <!-- Host Section -->
+                <div id="section-create" style="display: none;">
+                    <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom: 20px;">
+                        As Host, you control the current user story title, select the estimation deck, and reveal votes when ready.
+                    </p>
+                    <button id="btn-create-room" class="btn btn-primary" style="width: 100%;">
+                        Create Session as Host &rarr;
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <!-- VIEW 2: ACTIVE ROOM DASHBOARD -->
+        <main id="view-room" class="view-panel">
+            <!-- Story Header Box -->
+            <div class="story-box">
+                <div>
+                    <span class="story-tag">CURRENT USER STORY</span>
+                    <h2 id="story-title" class="story-title">User Story #1</h2>
+                    <p id="story-desc" class="story-desc">Estimate complexity for this task</p>
+                </div>
+                <button id="btn-edit-story" class="btn btn-secondary" style="font-size:0.85rem;">
+                    ✏️ Edit Story
+                </button>
+            </div>
+
+            <!-- Poker Table Felt & 20-Player Grid -->
+            <div class="poker-table-container">
+                <div class="poker-table-felt">
+                    <div style="text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; z-index:5;">
+                        <div id="badge-round-status" class="voting-status-badge badge-voting">
+                            ⏳ VOTING IN PROGRESS
+                        </div>
+
+                        <!-- Facilitator Control Buttons -->
+                        <div style="display:flex; gap:12px; flex-wrap:wrap; justify-content:center;">
+                            <button id="btn-reveal" class="btn btn-success" style="font-size:0.95rem; font-weight:700;">
+                                👁️ Reveal Votes
+                            </button>
+                            <button id="btn-reset" class="btn btn-secondary" style="font-size:0.85rem;">
+                                🔄 Clear / Re-vote
+                            </button>
+                            <button id="btn-save-story" class="btn btn-primary" style="font-size:0.85rem;">
+                                💾 Save Final Score
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Players Grid -->
+                    <div id="players-grid" class="players-grid"></div>
+                </div>
+            </div>
+
+            <!-- Statistics Drawer (Revealed State) -->
+            <div id="stats-container" class="glass-panel" style="padding:24px; margin-bottom:24px; display:none;">
+                <h3 style="font-size:1.1rem; margin-bottom:16px;">Voting Results & Analytics</h3>
+
+                <div class="stats-summary-grid">
+                    <div class="stat-card">
+                        <div id="stat-average" class="stat-value">—</div>
+                        <div class="stat-label">Average Estimate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div id="stat-median" class="stat-value">—</div>
+                        <div class="stat-label">Median Estimate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div id="stat-consensus" class="stat-value" style="font-size:1.2rem;">—</div>
+                        <div class="stat-label">Consensus Status</div>
+                    </div>
+                </div>
+
+                <h4 style="font-size:0.9rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-bottom:12px;">
+                    Vote Distribution
+                </h4>
+                <div id="dist-chart-container"></div>
+            </div>
+
+            <!-- Bottom Interactive Voting Deck Bar -->
+            <div class="voting-deck-container">
+                <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+                    <span style="font-size:0.8rem; font-weight:700; color:var(--text-muted); text-transform:uppercase;">
+                        Cast Your Estimate
+                    </span>
+
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:0.8rem; color:var(--text-muted);">Deck:</span>
+                        <select id="select-deck" class="input-control" style="padding:4px 10px; font-size:0.85rem; width:auto;">
+                            <option value="fibonacci">Standard Fibonacci (0, 1, 2, 3, 5, 8...)</option>
+                            <option value="mod_fibonacci">Modified Fibonacci (0, 1, 2, 3, 5, 8, 20...)</option>
+                            <option value="tshirt">T-Shirt Sizes (XS, S, M, L, XL)</option>
+                            <option value="powers2">Powers of 2 (0, 1, 2, 4, 8, 16...)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="deck-cards-list" class="deck-cards-list"></div>
+            </div>
+
+            <!-- Backlog History & Export -->
+            <div class="glass-panel" style="padding:20px; margin-top:24px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                    <h3 style="font-size:1.1rem; margin:0;">Sprint Estimation History</h3>
+                    <button id="btn-export-csv" class="btn btn-secondary" style="font-size:0.85rem; padding:6px 14px;">
+                        📥 Export CSV
+                    </button>
+                </div>
+                <div id="history-list" class="history-list"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Main Application Module -->
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

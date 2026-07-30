@@ -5,6 +5,7 @@
  */
 
 import { pokerState } from './state.js';
+import { incrementUsage } from './usage.js';
 
 // Default worker URL or relative route if hosted on worker
 const DEFAULT_WORKER_URL = window.WORKER_URL || 'https://sprint-poker-worker.workers.dev';
@@ -32,6 +33,7 @@ export class PokerNetworkController {
 
         // Try Worker HTTP REST Create first
         try {
+            incrementUsage();
             const res = await fetch(`${DEFAULT_WORKER_URL}/api/room/create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -80,6 +82,7 @@ export class PokerNetworkController {
 
         // Try Worker HTTP REST Join
         try {
+            incrementUsage();
             const res = await fetch(`${DEFAULT_WORKER_URL}/api/room/join`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -193,6 +196,7 @@ export class PokerNetworkController {
 
     sendEvent(type, payload = {}) {
         if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            incrementUsage();
             this.socket.send(JSON.stringify({ type, payload }));
         } else {
             // REST Fallback for vote/reveal/reset
@@ -202,6 +206,7 @@ export class PokerNetworkController {
 
     async sendRESTFallback(type, payload) {
         try {
+            incrementUsage();
             const myId = pokerState.get().myPeerId;
             await fetch(`${DEFAULT_WORKER_URL}/api/room/${type}`, {
                 method: 'POST',

@@ -581,3 +581,54 @@ body {
         height: 78px;
     }
 }
+
+/* API Usage Widget */
+.usage-widget {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.usage-ring-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+}
+
+.usage-pct-label {
+    position: absolute;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    pointer-events: none;
+}
+
+.usage-tooltip {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 10px;
+    background: #0f172a;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    padding: 12px 14px;
+    width: 190px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-6px);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1000;
+    pointer-events: none;
+}
+
+.usage-widget:hover .usage-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+

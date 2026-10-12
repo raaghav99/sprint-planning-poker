@@ -1,0 +1,17 @@
+{
+  "name": "sprint-poker-uat-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "UAT checks for Sprint Planning Poker: Playwright user flows + k6 rate-limit/load tests",
+  "scripts": {
+    "test": "playwright test",
+    "demo": "playwright test specs/00-demo.spec.js",
+    "report": "playwright show-report",
+    "k6:rate": "k6 run k6/rate-limit.js",
+    "k6:load": "k6 run k6/load-room.js",
+    "k6:probe": "k6 run k6/probe.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0"
+  }
+}

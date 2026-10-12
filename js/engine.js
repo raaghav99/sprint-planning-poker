@@ -88,23 +88,31 @@ export class PokerEngine {
         if (!history || history.length === 0) return;
 
         const headers = ['Story Title', 'Agreed Score', 'Average', 'Total Votes', 'Timestamp'];
+        // Quote every cell, double embedded quotes, and neutralise spreadsheet formulas (= + - @).
+        const cell = (value) => {
+            let text = String(value ?? '');
+            if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+            return `"${text.replace(/"/g, '""')}"`;
+        };
+
         const rows = history.map(item => [
-            `"${(item.title || '').replace(/"/g, '""')}"`,
-            `"${item.agreedPoints || 'N/A'}"`,
-            `"${item.stats?.average || 'N/A'}"`,
-            `"${item.stats?.totalVotes || 0}"`,
-            `"${new Date(item.timestamp || Date.now()).toLocaleString()}"`
+            cell(item.title),
+            cell(item.agreedPoints ?? 'N/A'),
+            cell(item.stats && item.stats.average !== undefined ? item.stats.average : 'N/A'),
+            cell(item.stats && item.stats.totalVotes !== undefined ? item.stats.totalVotes : 0),
+            cell(new Date(item.timestamp || Date.now()).toLocaleString())
         ]);
 
-        const csvContent = 'data:text/csv;charset=utf-8,' +
-            [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+        const csv = '\ufeff' + [headers.map(cell).join(','), ...rows.map(r => r.join(','))].join('\r\n');
 
-        const encodedUri = encodeURI(csvContent);
+        // Blob URL (not a data: URI) so '#', '&' and non-ASCII characters survive intact.
+        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
         const link = document.createElement('a');
-        link.setAttribute('href', encodedUri);
-        link.setAttribute('download', `Sprint_Planning_Poker_${Date.now()}.csv`);
+        link.href = url;
+        link.download = `Sprint_Planning_Poker_${Date.now()}.csv`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 }

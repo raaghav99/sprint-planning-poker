@@ -4,96 +4,172 @@
 
 import { CORS_HEADERS } from './constants.js';
 import { generateRoomCode, isValidRoomCode } from './validation.js';
+import { checkOrigin, clientIp, memoryRateLimited, checkCreateLimit } from './guard.js';
+
+const ACTIONS = new Set(['vote', 'reveal', 'reset', 'story', 'deck', 'save_story', 'make_host']);
+const JSON_HEADERS = { ...CORS_HEADERS, 'Content-Type': 'application/json' };
+
+function json(obj, status = 200) {
+    return new Response(JSON.stringify(obj), { status, headers: JSON_HEADERS });
+}
+
+async function readJson(request) {
+    try {
+        const body = await request.json();
+        return body && typeof body === 'object' && !Array.isArray(body) ? body : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function roomStub(env, code) {
+    return env.POKER_ROOM.get(env.POKER_ROOM.idFromName(code));
+}
+
+// Re-serialize the body so the Durable Object never sees a stale Content-Length.
+function forwardJson(env, code, url, body) {
+    return roomStub(env, code).fetch(new Request(`${url.origin}${url.pathname}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    }));
+}
+
+function normalizeCode(value) {
+    return typeof value === 'string' ? value.trim().toUpperCase() : '';
+}
 
 export async function handleApiRequest(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // Only the configured site(s) may use this backend from a browser. Room creation additionally
+    // REQUIRES an allowed Origin (browsers always send one on cross-origin POSTs).
+    const isCreate = path === '/api/room/create' && request.method === 'POST';
+    const originProblem = checkOrigin(request, env, { required: isCreate });
+    if (originProblem) {
+        return json({
+            error: originProblem === 'missing'
+                ? 'Missing Origin header. Use the Planning Poker web page.'
+                : 'This site is not allowed to use this backend.',
+            code: 'origin_blocked' // lets the client tell this apart from a seat/token problem
+        }, 403);
+    }
+
     if (request.method === 'OPTIONS') {
         return new Response(null, { headers: CORS_HEADERS });
     }
 
-    // CREATE ROOM (/api/room/create)
-    if (path === '/api/room/create') {
-        const body = await request.json();
-        const code = (body.roomCode || generateRoomCode()).toUpperCase();
-        const id = env.POKER_ROOM.idFromName(code);
-        const roomStub = env.POKER_ROOM.get(id);
-
-        const forwardReq = new Request(`${url.origin}/api/room/create`, {
-            method: 'POST',
-            headers: request.headers,
-            body: JSON.stringify({ ...body, roomCode: code })
+    // Cheap best-effort throttle for all traffic (also slows down room-code probing).
+    const ip = clientIp(request);
+    if (memoryRateLimited(ip, env)) {
+        return new Response(JSON.stringify({ error: 'Too many requests. Please wait a minute and try again.' }), {
+            status: 429,
+            headers: { ...JSON_HEADERS, 'Retry-After': '60' }
         });
-
-        return roomStub.fetch(forwardReq);
-    }
-
-    // JOIN ROOM (/api/room/join)
-    if (path === '/api/room/join') {
-        const body = await request.json();
-        const code = (body.room || body.roomCode || '').toUpperCase();
-
-        if (!isValidRoomCode(code)) {
-            return new Response(JSON.stringify({ error: 'Invalid room code' }), {
-                status: 400,
-                headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
-            });
-        }
-
-        const id = env.POKER_ROOM.idFromName(code);
-        const roomStub = env.POKER_ROOM.get(id);
-
-        const forwardReq = new Request(`${url.origin}/api/room/join`, {
-            method: 'POST',
-            headers: request.headers,
-            body: JSON.stringify(body)
-        });
-
-        return roomStub.fetch(forwardReq);
-    }
-
-    // ROOM STATE (/api/room/state)
-    if (path === '/api/room/state') {
-        const code = (url.searchParams.get('room') || '').toUpperCase();
-        if (!isValidRoomCode(code)) {
-            return new Response(JSON.stringify({ error: 'Invalid room code' }), {
-                status: 400,
-                headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
-            });
-        }
-
-        const id = env.POKER_ROOM.idFromName(code);
-        const roomStub = env.POKER_ROOM.get(id);
-        return roomStub.fetch(request);
     }
 
     // WEBSOCKET (/ws)
-    if (path === '/ws' || request.headers.get('Upgrade') === 'websocket') {
-        const code = (url.searchParams.get('room') || '').toUpperCase();
+    if (path === '/ws') {
+        if (request.headers.get('Upgrade') !== 'websocket') {
+            return json({ error: 'Expected WebSocket upgrade' }, 426);
+        }
+        const code = normalizeCode(url.searchParams.get('room'));
         if (!isValidRoomCode(code)) {
             return new Response('Invalid room code', { status: 400 });
         }
-
-        const id = env.POKER_ROOM.idFromName(code);
-        const roomStub = env.POKER_ROOM.get(id);
-        return roomStub.fetch(request);
+        return roomStub(env, code).fetch(request);
     }
 
-    // ROUTE OTHER ACTION ENDPOINTS (/api/room/vote, /api/room/reveal, /api/room/reset, /api/room/story)
-    if (path.startsWith('/api/room/')) {
-        const body = await request.clone().json().catch(() => ({}));
-        const code = (body.room || body.roomCode || url.searchParams.get('room') || '').toUpperCase();
+    // ROOM STATE (GET /api/room/state?room=CODE)
+    if (path === '/api/room/state') {
+        if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+        const code = normalizeCode(url.searchParams.get('room'));
+        if (!isValidRoomCode(code)) return json({ error: 'Invalid room code' }, 400);
+        return roomStub(env, code).fetch(request);
+    }
 
-        if (isValidRoomCode(code)) {
-            const id = env.POKER_ROOM.idFromName(code);
-            const roomStub = env.POKER_ROOM.get(id);
-            return roomStub.fetch(request);
+    // INACTIVE SEATS (GET /api/room/seats?room=CODE)
+    if (path === '/api/room/seats') {
+        if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+        const code = normalizeCode(url.searchParams.get('room'));
+        if (!isValidRoomCode(code)) return json({ error: 'Invalid room code' }, 400);
+        return roomStub(env, code).fetch(request);
+    }
+
+    // CLAIM A SEAT (POST /api/room/claim)
+    if (path === '/api/room/claim') {
+        if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+        const body = await readJson(request);
+        if (!body) return json({ error: 'Invalid JSON body' }, 400);
+
+        const code = normalizeCode(body.room || body.roomCode);
+        if (!isValidRoomCode(code)) return json({ error: 'Invalid room code' }, 400);
+
+        return forwardJson(env, code, url, body);
+    }
+
+    // LEAVE (POST /api/room/leave)
+    if (path === '/api/room/leave') {
+        if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+        const body = await readJson(request);
+        if (!body) return json({ error: 'Invalid JSON body' }, 400);
+
+        const code = normalizeCode(body.room || body.roomCode);
+        if (!isValidRoomCode(code)) return json({ error: 'Invalid room code' }, 400);
+
+        return forwardJson(env, code, url, body);
+    }
+
+    // CREATE ROOM (POST /api/room/create)
+    if (path === '/api/room/create') {
+        if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+        const body = await readJson(request);
+        if (!body) return json({ error: 'Invalid JSON body' }, 400);
+
+        const code = body.roomCode === undefined || body.roomCode === null
+            ? generateRoomCode()
+            : normalizeCode(body.roomCode);
+        if (!isValidRoomCode(code)) return json({ error: 'Invalid room code' }, 400);
+
+        // Exact per-IP limit on creating rooms (each room is a new Durable Object).
+        const limit = await checkCreateLimit(env, ip);
+        if (!limit.ok) {
+            return new Response(JSON.stringify({
+                error: `Too many rooms created from your network. Please wait ${limit.retryAfter || 60} seconds and try again.`
+            }), {
+                status: 429,
+                headers: { ...JSON_HEADERS, 'Retry-After': String(limit.retryAfter || 60) }
+            });
         }
+
+        return forwardJson(env, code, url, { ...body, roomCode: code });
     }
 
-    return new Response(JSON.stringify({ error: 'API route not found' }), {
-        status: 404,
-        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
-    });
+    // JOIN ROOM (POST /api/room/join)
+    if (path === '/api/room/join') {
+        if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+        const body = await readJson(request);
+        if (!body) return json({ error: 'Invalid JSON body' }, 400);
+
+        const code = normalizeCode(body.room || body.roomCode);
+        if (!isValidRoomCode(code)) return json({ error: 'Invalid room code' }, 400);
+
+        return forwardJson(env, code, url, body);
+    }
+
+    // ACTIONS (POST /api/room/{vote|reveal|reset|story|deck|save_story})
+    const match = path.match(/^\/api\/room\/([a-z_]+)$/);
+    if (match && ACTIONS.has(match[1])) {
+        if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+        const body = await readJson(request);
+        if (!body) return json({ error: 'Invalid JSON body' }, 400);
+
+        const code = normalizeCode(body.room || body.roomCode);
+        if (!isValidRoomCode(code)) return json({ error: 'Invalid room code' }, 400);
+
+        return forwardJson(env, code, url, body);
+    }
+
+    return json({ error: 'API route not found' }, 404);
 }

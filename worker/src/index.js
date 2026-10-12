@@ -3,12 +3,22 @@
  */
 
 import { PokerRoom } from './Room.js';
+import { RateLimiter } from './RateLimiter.js';
 import { handleApiRequest } from './routes.js';
+import { CORS_HEADERS } from './constants.js';
 
-export { PokerRoom };
+export { PokerRoom, RateLimiter };
 
 export default {
     async fetch(request, env, ctx) {
-        return handleApiRequest(request, env);
+        try {
+            return await handleApiRequest(request, env);
+        } catch (err) {
+            console.error('[Worker Error]:', err);
+            return new Response(JSON.stringify({ error: 'Internal error' }), {
+                status: 500,
+                headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' }
+            });
+        }
     }
 };

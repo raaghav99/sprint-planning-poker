@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sprint Planning Poker – Agile Estimation Tool</title>
     <meta name="description" content="Free, zero-WebRTC Agile Sprint Planning Poker tool for remote development teams. Instant link sharing, 20+ member support, 3D card flip reveal, Fibonacci decks, and CSV report export.">
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=2.3.0">
     <script>
         // Cloudflare Workers + Durable Objects Backend URL Endpoint
         window.WORKER_URL = "https://sprint-poker-worker.temp66081.workers.dev";
@@ -70,6 +70,11 @@
                     <button id="btn-join-room" class="btn btn-primary" style="width: 100%; margin-top: 12px;">
                         Join Session &rarr;
                     </button>
+
+                    <button id="btn-show-seats" type="button" class="btn btn-secondary" style="width: 100%; margin-top: 10px;">
+                        Rejoin a previous seat&hellip;
+                    </button>
+                    <div id="seat-picker" class="seat-picker" style="display: none;" aria-live="polite"></div>
                 </div>
 
                 <!-- Host Section -->
@@ -77,6 +82,12 @@
                     <p style="color:var(--text-muted); font-size:0.85rem; margin-bottom: 20px;">
                         As Host, you control the current user story title, select the estimation deck, and reveal votes when ready.
                     </p>
+
+                    <div class="input-group">
+                        <label class="input-label" for="input-host-name">Your Display Name</label>
+                        <input type="text" id="input-host-name" class="input-control" placeholder="e.g. Sam (Scrum Master)" maxlength="20">
+                    </div>
+
                     <button id="btn-create-room" class="btn btn-primary" style="width: 100%;">
                         Create Session as Host &rarr;
                     </button>
@@ -185,6 +196,7 @@
     </div>
 
     <!-- Main Application Module -->
-    <script type="module" src="js/app.js?v=2.2.0"></script>
+    <script src="js/vendor/qrcode-generator.js?v=2.3.0"></script>
+    <script type="module" src="js/app.js?v=2.3.0"></script>
 </body>
 </html>

@@ -432,7 +432,10 @@ body {
     gap: 12px;
     overflow-x: auto;
     max-width: 100%;
-    padding: 8px 4px 14px;
+    /* The strip scrolls sideways, which also clips anything that rises above it. A hovered card lifts
+       ~11px and the selected one ~17px (translate + scale), so leave headroom above and room at the sides. */
+    padding: 26px 12px 14px;
+    margin-top: -14px;
 }
 
 .deck-card {
@@ -632,3 +635,91 @@ body {
     transform: translateY(0);
 }
 
+/* Host-only button under a player's seat */
+.make-host-btn {
+    margin-top: 6px;
+    padding: 3px 10px;
+    font-size: 0.72rem;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.make-host-btn:hover,
+.make-host-btn:focus-visible {
+    color: #fff;
+    border-color: #6366f1;
+    background: rgba(99, 102, 241, 0.25);
+}
+
+/* Rejoin picker: inactive seats that can be taken over */
+.seat-picker {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+}
+
+.seat-picker .seat-hint {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+
+.seat-option {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.seat-option:hover,
+.seat-option:focus-visible {
+    border-color: #6366f1;
+    background: rgba(99, 102, 241, 0.18);
+}
+
+.seat-option .seat-meta {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+/* Players that dropped their connection (they can still reconnect) */
+.player-seat.disconnected {
+    opacity: 0.45;
+}
+
+/* Votes are locked once revealed */
+.deck-card:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Phones: the deck picker row must never be wider than the screen (it stretched the whole page) */
+.voting-deck-container div {
+    min-width: 0;
+    max-width: 100%;
+}
+
+#select-deck {
+    min-width: 0;
+    max-width: 100%;
+    text-overflow: ellipsis;
+}
+
+@media (max-width: 480px) {
+    #select-deck {
+        max-width: 58vw;
+    }
+}

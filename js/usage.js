@@ -97,7 +97,7 @@ function _updateWidget() {
         const remFmt = remaining.toLocaleString();
 
         tip.innerHTML = `
-            <div style="font-weight:700; margin-bottom:4px; font-size:0.82rem; color:#f8fafc;">⚡ Cloudflare 100K Daily Quota</div>
+            <div style="font-weight:700; margin-bottom:4px; font-size:0.82rem; color:#f8fafc;">⚡ Requests from this browser today</div>
             <div style="color:${color}; font-weight:700; font-size:1.05rem; margin-bottom:4px;">${countFmt} / ${budgetFmt}</div>
             <div style="color:#94a3b8; font-size:0.75rem; margin-bottom:4px;">Used: <strong style="color:#e2e8f0;">${percent}%</strong> | Remaining: <strong style="color:#10b981;">${remFmt}</strong></div>
             <div style="border-top:1px solid rgba(255,255,255,0.1); padding-top:6px; margin-top:4px; color:#94a3b8; font-size:0.72rem;">
@@ -114,7 +114,7 @@ export function initUsageWidget() {
     const circumference = 2 * Math.PI * 14;
 
     widget.innerHTML = `
-        <div class="usage-ring-wrap" title="Cloudflare 100,000 Requests Daily Limit">
+        <div class="usage-ring-wrap" title="Requests sent from this browser today. Cloudflare free limit: 100,000/day, shared by all users.">
             <svg width="36" height="36" viewBox="0 0 36 36">
                 <circle cx="18" cy="18" r="14"
                     fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3.5"/>

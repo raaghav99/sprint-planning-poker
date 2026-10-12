@@ -2,18 +2,22 @@
  * Standalone Sprint Planning Poker - UI Controller & Event Handlers
  */
 
-import { pokerState, DECKS } from './state.js';
-import { PokerNetworkController } from './network.js';
-import { PokerEngine } from './engine.js';
-import { showQRCodeModal } from './qrcode.js';
+import { pokerState, DECKS, getResumeTarget, getSeat, clearSession, clearLastRoom } from './state.js?v=2.3.0';
+import { PokerNetworkController } from './network.js?v=2.3.0';
+import { PokerEngine } from './engine.js?v=2.3.0';
+import { showQRCodeModal } from './qrcode.js?v=2.3.0';
+import { escapeHtml, isValidRoomCode } from './util.js?v=2.3.0';
 
 export class PokerUIController {
     constructor() {
         this.network = new PokerNetworkController();
+        this.network.onError = (msg) => this._showNotification(msg, 'error');
+        this.network.onNotice = (msg) => this._showNotification(msg, 'info');
         this.initDOM();
         this.bindEvents();
         this.checkURLParams();
         this.subscribeState();
+        this.restoreSession();
     }
 
     initDOM() {
@@ -34,8 +38,11 @@ export class PokerUIController {
 
         this.inputRoomCode = document.getElementById('input-room-code');
         this.inputPlayerName = document.getElementById('input-player-name');
+        this.inputHostName = document.getElementById('input-host-name');
         this.btnJoinRoom = document.getElementById('btn-join-room');
         this.btnCreateRoom = document.getElementById('btn-create-room');
+        this.btnShowSeats = document.getElementById('btn-show-seats');
+        this.seatPicker = document.getElementById('seat-picker');
 
         this.storyTitle = document.getElementById('story-title');
         this.storyDesc = document.getElementById('story-desc');
@@ -74,19 +81,32 @@ export class PokerUIController {
 
         // Host Create Room
         this.btnCreateRoom.addEventListener('click', async () => {
-            const name = this.inputPlayerName.value.trim() || 'Scrum Master';
-            const code = this._generateRoomCode();
+            const name = this.inputHostName.value.trim() || this.inputPlayerName.value.trim() || 'Scrum Master';
             this.btnCreateRoom.disabled = true;
             this.btnCreateRoom.textContent = 'Creating Session...';
             try {
-                await this.network.createRoom(code, name);
+                let code;
+                // A freshly generated code can (rarely) collide with a live room: retry.
+                for (let attempt = 0; ; attempt++) {
+                    code = this._generateRoomCode();
+                    try {
+                        await this.network.createRoom(code, name);
+                        break;
+                    } catch (err) {
+                        if (err.status !== 409 || attempt >= 4) throw err;
+                    }
+                }
                 this._showNotification(`Session Created! Code: ${code}`, 'success');
             } catch (err) {
+                if (err.status === -1) return; // superseded by a newer action
                 this._showNotification(err.message || 'Failed to create room.', 'error');
                 this.btnCreateRoom.disabled = false;
                 this.btnCreateRoom.textContent = 'Create Session as Host →';
             }
         });
+
+        // Rejoin a previous seat (lost token, closed tab, cleared storage)
+        this.btnShowSeats.addEventListener('click', () => this.toggleSeatPicker());
 
         // Player Join Room
         this.btnJoinRoom.addEventListener('click', async () => {
@@ -108,7 +128,12 @@ export class PokerUIController {
                 await this.network.joinRoom(code, name);
                 this._showNotification('Joined Session Successfully!', 'success');
             } catch (err) {
-                this._showNotification(err.message || 'Failed to join session.', 'error');
+                if (err.status === -1) return; // superseded by a newer action
+                if (err.code === 'name_inactive' && err.data && err.data.seatRef) {
+                    this.offerJoinBack(code, err.data);
+                } else {
+                    this._showNotification(err.message || 'Failed to join session.', 'error');
+                }
                 this.btnJoinRoom.disabled = false;
                 this.btnJoinRoom.textContent = 'Join Session →';
             }
@@ -116,10 +141,14 @@ export class PokerUIController {
 
         // Shareable Link Copy
         this.btnShareLink.addEventListener('click', () => {
-            const code = pokerState.get().roomCode;
-            if (!code) return;
+            const st = pokerState.get();
+            const code = st.role !== 'LOBBY' ? st.roomCode : null;
+            if (!isValidRoomCode(code)) return;
             const url = `${window.location.origin}${window.location.pathname}?room=${code}`;
-            navigator.clipboard.writeText(url).then(() => {
+            const copy = navigator.clipboard && navigator.clipboard.writeText
+                ? navigator.clipboard.writeText(url)
+                : Promise.reject(new Error('Clipboard unavailable'));
+            copy.then(() => {
                 this._showNotification('🔗 Share link copied to clipboard!', 'success');
             }).catch(() => {
                 prompt('Copy Room URL:', url);
@@ -128,8 +157,9 @@ export class PokerUIController {
 
         // QR Code Generator
         this.btnQRCode.addEventListener('click', () => {
-            const code = pokerState.get().roomCode || this.inputRoomCode.value.trim().toUpperCase();
-            if (!code) {
+            const st = pokerState.get();
+            const code = st.role !== 'LOBBY' ? st.roomCode : this.inputRoomCode.value.trim().toUpperCase();
+            if (!isValidRoomCode(code)) {
                 this._showNotification('Please enter or create a Room Code first!', 'warning');
                 return;
             }
@@ -138,9 +168,9 @@ export class PokerUIController {
         });
 
         // Exit Room
-        this.btnExitRoom.addEventListener('click', () => {
+        this.btnExitRoom.addEventListener('click', async () => {
             if (confirm('Are you sure you want to exit the room?')) {
-                this.network.disconnect();
+                await this.network.exit(); // frees the seat on the server before the page reloads
                 pokerState.reset();
                 window.location.search = '';
             }
@@ -151,7 +181,8 @@ export class PokerUIController {
             const st = pokerState.get();
             const newTitle = prompt('Enter User Story Title / ID:', st.currentStory.title);
             if (newTitle !== null && newTitle.trim()) {
-                const newDesc = prompt('Enter Brief Description (Optional):', st.currentStory.description) || '';
+                const newDesc = prompt('Enter Brief Description (Optional):', st.currentStory.description);
+                if (newDesc === null) return; // Cancel keeps the current story untouched
                 this.network.updateStory(newTitle, newDesc);
             }
         });
@@ -192,13 +223,155 @@ export class PokerUIController {
         });
     }
 
+    /** Show/hide the list of inactive seats for the typed room code. */
+    async toggleSeatPicker() {
+        if (this.seatPicker.style.display !== 'none') {
+            this.seatPicker.style.display = 'none';
+            return;
+        }
+        const code = this.inputRoomCode.value.trim().toUpperCase();
+        if (!isValidRoomCode(code)) {
+            this._showNotification('Enter the Room Code first.', 'warning');
+            return;
+        }
+        await this.refreshSeatPicker(code);
+    }
+
+    async refreshSeatPicker(code) {
+        this.seatPicker.style.display = 'flex';
+        this.seatPicker.replaceChildren();
+        const hint = (text) => {
+            const p = document.createElement('div');
+            p.className = 'seat-hint';
+            p.textContent = text;
+            this.seatPicker.appendChild(p);
+        };
+
+        let seats;
+        try {
+            seats = await this.network.listSeats(code);
+        } catch (err) {
+            hint(err.message || 'Could not load seats.');
+            return;
+        }
+
+        if (seats.length === 0) {
+            hint('No inactive seats in this room. Use "Join Session" to join as a new player.');
+            return;
+        }
+
+        hint('Pick your name to continue as that player:');
+        seats.forEach((seat) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'seat-option';
+
+            const name = document.createElement('span');
+            name.textContent = seat.displayName;
+            const meta = document.createElement('span');
+            meta.className = 'seat-meta';
+            const mins = Math.floor(seat.inactiveSeconds / 60);
+            meta.textContent = mins >= 1 ? `inactive ${mins} min` : 'inactive < 1 min';
+            btn.append(name, meta);
+
+            btn.addEventListener('click', () => this.claimSeat(code, seat.ref, btn, seat.displayName));
+            this.seatPicker.appendChild(btn);
+        });
+
+        const first = this.seatPicker.querySelector('.seat-option');
+        if (first) first.focus();
+    }
+
+    /** "<Name> is inactive. Join back as <Name>?" shown when the typed name matches an inactive seat. */
+    offerJoinBack(code, data) {
+        this.seatPicker.style.display = 'flex';
+        this.seatPicker.replaceChildren();
+
+        const hint = document.createElement('div');
+        hint.className = 'seat-hint';
+        hint.textContent = `${data.seatName} is inactive. Is that you?`;
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'seat-option';
+        const label = document.createElement('span');
+        label.textContent = `Join back as ${data.seatName}`;
+        btn.appendChild(label);
+        btn.addEventListener('click', () => this.claimSeat(code, data.seatRef, btn, data.seatName));
+
+        const alt = document.createElement('div');
+        alt.className = 'seat-hint';
+        alt.textContent = 'Not you? Type a different name above and join again.';
+
+        this.seatPicker.append(hint, btn, alt);
+        btn.focus();
+    }
+
+    async claimSeat(code, ref, btn, name) {
+        btn.disabled = true;
+        try {
+            try {
+                await this.network.claimSeat(code, ref);
+            } catch (err) {
+                if (err.code !== 'own_seat') throw err;
+                // This browser already holds a seat in the room: resume that one, under its own name.
+                const own = getSeat(code);
+                if (!own) throw err;
+                await this.network.joinRoom(code, own.displayName || pokerState.get().displayName || '');
+            }
+            this._showNotification('Seat restored. Welcome back!', 'success');
+        } catch (err) {
+            if (err.status === -1) return; // superseded by a newer action
+            this._showNotification(err.message || 'Could not take over that seat.', 'error');
+            // The list is stale (seat taken/active/removed): reload it
+            if (err.status === 404 || err.status === 409) await this.refreshSeatPicker(code);
+            else btn.disabled = false;
+        }
+    }
+
     checkURLParams() {
         const params = new URLSearchParams(window.location.search);
-        const roomParam = params.get('room') || params.get('code');
-        if (roomParam) {
-            this.inputRoomCode.value = roomParam.toUpperCase();
+        const roomParam = (params.get('room') || params.get('code') || '').trim().toUpperCase();
+        if (isValidRoomCode(roomParam)) {
+            this.inputRoomCode.value = roomParam;
             this.tabJoin.click();
-            this._showNotification(`Room code ${roomParam.toUpperCase()} loaded from link!`, 'info');
+            this._showNotification(`Room code ${roomParam} loaded from link!`, 'info');
+        }
+
+        // Prefill the remembered display name on both entry forms
+        const savedName = pokerState.get().displayName;
+        if (savedName) {
+            this.inputPlayerName.value = savedName;
+            this.inputHostName.value = savedName;
+        }
+    }
+
+    /** After a reload, silently rejoin the room this tab was in (keeps host seat + token). */
+    async restoreSession() {
+        const sess = getResumeTarget();
+        if (!sess || !isValidRoomCode(sess.roomCode)) return;
+
+        // A different room in the link means the user wants to switch rooms.
+        const linked = this.inputRoomCode.value.trim().toUpperCase();
+        if (linked && linked !== sess.roomCode) return;
+
+        try {
+            await this.network.joinRoom(sess.roomCode, sess.displayName || 'Guest');
+        } catch (err) {
+            if (err.status === -1) return; // superseded by the user's own action
+            // Room expired or seat is gone: stay in the lobby with the code prefilled.
+            this.inputRoomCode.value = sess.roomCode;
+            if (err.code === 'name_inactive' && err.data && err.data.seatRef) {
+                this.inputPlayerName.value = sess.displayName || '';
+                this.tabJoin.click();
+                this.offerJoinBack(sess.roomCode, err.data);
+                return;
+            }
+            if (err.status === 404 || err.status === 403) {
+                clearSession(); // keep everything on transient errors
+                clearLastRoom(sess.roomCode);
+            }
+            this._showNotification(`Could not rejoin your previous session: ${err.message}`, 'warning');
         }
     }
 
@@ -213,6 +386,12 @@ export class PokerUIController {
             this.headerRoomCode.textContent = '------';
             this.headerRoleBadge.style.display = 'none';
             this.btnExitRoom.style.display = 'none';
+            this.btnJoinRoom.disabled = false;
+            this.btnJoinRoom.textContent = 'Join Session →';
+            this.btnCreateRoom.disabled = false;
+            this.btnCreateRoom.textContent = 'Create Session as Host →';
+            this._deckKey = this._gridKey = this._statsKey = this._historyKey = null;
+            this.seatPicker.style.display = 'none';
             return;
         }
 
@@ -230,7 +409,11 @@ export class PokerUIController {
 
         this.selectDeck.value = st.deckType;
         this.selectDeck.disabled = (st.role !== 'HOST');
-        this.renderVotingDeck(st);
+        const deckKey = [st.deckType, st.myVote, st.roundStatus, st.isObserver].join('|');
+        if (deckKey !== this._deckKey) {
+            this._deckKey = deckKey;
+            this.renderVotingDeck(st);
+        }
 
         if (st.roundStatus === 'REVEALED') {
             this.badgeRoundStatus.textContent = '👁️ VOTES REVEALED';
@@ -240,19 +423,35 @@ export class PokerUIController {
             this.badgeRoundStatus.className = 'voting-status-badge badge-voting';
         }
 
-        this.renderPlayersGrid(st);
-        this.renderStats(st);
+        // Only rebuild the parts whose inputs changed (keeps keyboard focus on the deck).
+        const gridKey = JSON.stringify([st.players, st.votes, st.roundStatus, st.myPeerId, st.role]);
+        if (gridKey !== this._gridKey) {
+            this._gridKey = gridKey;
+            this.renderPlayersGrid(st);
+        }
+        const statsKey = JSON.stringify([st.votes, st.roundStatus]);
+        if (statsKey !== this._statsKey) {
+            this._statsKey = statsKey;
+            this.renderStats(st);
+        }
 
         const isHost = (st.role === 'HOST');
         this.btnReveal.style.display = isHost ? 'inline-block' : 'none';
         this.btnReset.style.display = isHost ? 'inline-block' : 'none';
-        this.btnSaveStory.style.display = isHost ? 'inline-block' : 'none';
+        // Saving only makes sense once the votes are revealed
+        this.btnSaveStory.style.display = (isHost && st.roundStatus === 'REVEALED') ? 'inline-block' : 'none';
 
-        this.renderHistory(st.history);
+        const historyKey = JSON.stringify(st.history);
+        if (historyKey !== this._historyKey) {
+            this._historyKey = historyKey;
+            this.renderHistory(st.history);
+        }
     }
 
     renderVotingDeck(st) {
         const deckDef = DECKS[st.deckType] || DECKS.fibonacci;
+        const active = document.activeElement;
+        const focusedValue = active && this.deckCardsContainer.contains(active) ? active.textContent : null;
         this.deckCardsContainer.innerHTML = '';
 
         if (st.isObserver) {
@@ -265,6 +464,7 @@ export class PokerUIController {
             btn.className = 'deck-card';
             if (st.myVote === val) btn.classList.add('selected');
             btn.textContent = val;
+            btn.disabled = (st.roundStatus === 'REVEALED'); // votes are locked after reveal
 
             btn.addEventListener('click', () => {
                 const newVote = (st.myVote === val) ? null : val;
@@ -272,6 +472,7 @@ export class PokerUIController {
             });
 
             this.deckCardsContainer.appendChild(btn);
+            if (focusedValue !== null && val === focusedValue) btn.focus();
         });
     }
 
@@ -289,11 +490,11 @@ export class PokerUIController {
             const isRevealed = (st.roundStatus === 'REVEALED');
 
             const seatEl = document.createElement('div');
-            seatEl.className = 'player-seat';
+            seatEl.className = 'player-seat' + (p.connected === false ? ' disconnected' : '');
 
             let cardContentHtml = '';
             if (isRevealed) {
-                const displayVal = voteVal || '—';
+                const displayVal = escapeHtml(voteVal || '—');
                 cardContentHtml = `
                     <div class="poker-card-3d flipped">
                         <div class="poker-card-inner">
@@ -318,10 +519,29 @@ export class PokerUIController {
             seatEl.innerHTML = `
                 ${cardContentHtml}
                 <div class="player-name">
-                    ${p.displayName}
+                    ${escapeHtml(p.displayName)}
                     ${p.id === st.myPeerId ? '<span class="player-role-tag">YOU</span>' : ''}
                 </div>
             `;
+
+            // The host can hand the role to any other connected player
+            if (st.role === 'HOST' && p.id !== st.myPeerId && p.connected !== false) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'make-host-btn';
+                btn.textContent = 'Make host';
+                btn.title = `Make ${p.displayName} the host`;
+                btn.addEventListener('click', () => {
+                    const acting = pokerState.get().actingHost;
+                    const warning = acting
+                        ? 'You are the acting host: the original host will NOT get the host role back.'
+                        : 'You will lose the host controls.';
+                    if (confirm(`Make ${p.displayName} the host? ${warning}`)) {
+                        this.network.makeHost(p.id);
+                    }
+                });
+                seatEl.appendChild(btn);
+            }
 
             this.playersGrid.appendChild(seatEl);
         });
@@ -336,9 +556,16 @@ export class PokerUIController {
         this.statsContainer.style.display = 'block';
         const stats = PokerEngine.calculateStats(st.votes);
 
-        const consensusHtml = stats.isConsensus
-            ? `<span style="color:#34d399; font-weight:700;">🎉 Unanimous (${stats.consensusValue} pts)</span>`
-            : `<span style="color:#f59e0b; font-weight:700;">⚠️ Range (${stats.min} – ${stats.max})</span>`;
+        let consensusHtml;
+        if (stats.isConsensus) {
+            consensusHtml = `<span style="color:#34d399; font-weight:700;">🎉 Unanimous (${escapeHtml(stats.consensusValue)} pts)</span>`;
+        } else if (stats.numericVotesCount === 0) {
+            consensusHtml = '<span style="color:#94a3b8; font-weight:700;">No numeric votes</span>';
+        } else if (stats.min === stats.max) {
+            consensusHtml = `<span style="color:#94a3b8; font-weight:700;">Single value (${stats.min} pts)</span>`;
+        } else {
+            consensusHtml = `<span style="color:#f59e0b; font-weight:700;">⚠️ Range (${stats.min} – ${stats.max})</span>`;
+        }
 
         document.getElementById('stat-average').textContent = stats.numericVotesCount > 0 ? stats.average : '—';
         document.getElementById('stat-median').textContent = stats.numericVotesCount > 0 ? stats.median : '—';
@@ -357,7 +584,7 @@ export class PokerUIController {
             const row = document.createElement('div');
             row.className = 'dist-bar-item';
             row.innerHTML = `
-                <div class="dist-bar-val">${val}</div>
+                <div class="dist-bar-val">${escapeHtml(val)}</div>
                 <div class="dist-bar-track">
                     <div class="dist-bar-fill" style="width: ${pct}%;"></div>
                 </div>
@@ -378,8 +605,8 @@ export class PokerUIController {
             const el = document.createElement('div');
             el.className = 'history-item';
             el.innerHTML = `
-                <div class="history-item-title">${item.title}</div>
-                <div class="history-item-points">${item.agreedPoints} Points</div>
+                <div class="history-item-title">${escapeHtml(item.title)}</div>
+                <div class="history-item-points">${escapeHtml(item.agreedPoints)} Points</div>
             `;
             this.historyList.appendChild(el);
         });
@@ -395,23 +622,29 @@ export class PokerUIController {
     }
 
     _showNotification(msg, type = 'info') {
+        // Stack toasts in one live region so they never overlap and are announced to screen readers.
+        let stack = document.getElementById('toast-stack');
+        if (!stack) {
+            stack = document.createElement('div');
+            stack.id = 'toast-stack';
+            stack.setAttribute('role', 'status');
+            stack.setAttribute('aria-live', 'polite');
+            stack.style.cssText = 'position:fixed; bottom:24px; right:24px; display:flex; flex-direction:column; gap:8px; z-index:1000; max-width:calc(100vw - 48px);';
+            document.body.appendChild(stack);
+        }
         const div = document.createElement('div');
         div.style.cssText = `
-            position: fixed;
-            bottom: 24px;
-            right: 24px;
             padding: 12px 20px;
             background: #1e293b;
             color: #ffffff;
             border-radius: 8px;
             border-left: 4px solid ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#6366f1'};
             box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-            z-index: 1000;
             font-size: 0.9rem;
             font-weight: 600;
         `;
         div.textContent = msg;
-        document.body.appendChild(div);
-        setTimeout(() => div.remove(), 3000);
+        stack.appendChild(div);
+        setTimeout(() => div.remove(), 4000);
     }
 }

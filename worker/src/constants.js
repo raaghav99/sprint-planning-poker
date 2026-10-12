@@ -4,7 +4,6 @@
 
 export const ROOM_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 2 hours room expiration
 export const MAX_PLAYERS = 50; // Support up to 50 players per room
-export const PING_INTERVAL_MS = 30000; // 30 second WebSocket heartbeat
 
 export const DECKS = {
     fibonacci: ['0', '0.5', '1', '2', '3', '5', '8', '13', '21', '34', '55', '89', '☕', '❓'],

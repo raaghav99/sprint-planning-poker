@@ -2,11 +2,23 @@
   "name": "sprint-poker-worker",
   "main": "src/index.js",
   "compatibility_date": "2025-01-01",
+  "observability": {
+    "enabled": true
+  },
+  // Sites allowed to call this backend from a browser (comma separated origins, no path).
+  // Add a custom domain here if you ever move the frontend. Empty/missing = no restriction.
+  "vars": {
+    "ALLOWED_ORIGINS": "https://raaghav99.github.io"
+  },
   "durable_objects": {
     "bindings": [
       {
         "name": "POKER_ROOM",
         "class_name": "PokerRoom"
+      },
+      {
+        "name": "RATE_LIMITER",
+        "class_name": "RateLimiter"
       }
     ]
   },
@@ -16,6 +28,38 @@
       "new_sqlite_classes": [
         "PokerRoom"
       ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "RateLimiter"
+      ]
     }
-  ]
+  ],
+
+  // UAT: a completely separate worker (own name, own Durable Objects, own data) that also serves
+  // the frontend, so changes can be tested end to end before touching production.
+  //   npm run deploy:uat      -> https://sprint-poker-worker-uat.<account>.workers.dev
+  "env": {
+    "uat": {
+      "name": "sprint-poker-worker-uat",
+      "vars": {
+        "ALLOWED_ORIGINS": "https://sprint-poker-worker-uat.temp66081.workers.dev"
+      },
+      "assets": {
+        "directory": "./.uat-site",
+        "run_worker_first": ["/api/*", "/ws"]
+      },
+      "durable_objects": {
+        "bindings": [
+          { "name": "POKER_ROOM", "class_name": "PokerRoom" },
+          { "name": "RATE_LIMITER", "class_name": "RateLimiter" }
+        ]
+      },
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["PokerRoom"] },
+        { "tag": "v2", "new_sqlite_classes": ["RateLimiter"] }
+      ]
+    }
+  }
 }

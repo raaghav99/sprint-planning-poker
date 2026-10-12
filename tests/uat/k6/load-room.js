@@ -9,7 +9,9 @@ import { check, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
 
 const BASE = (__ENV.UAT_URL || 'https://sprint-poker-worker-uat.temp66081.workers.dev').replace(/\/$/, '');
-const WS_BASE = BASE.replace(/^http/, 'ws');
+const API = (__ENV.API_URL || BASE).replace(/\/$/, '');          // the worker (differs from the page on production)
+const ORIGIN = BASE.replace(/^(https?:\/\/[^/]+).*$/, '$1');           // Origin header a browser on the page sends
+const WS_BASE = API.replace(/^http/, 'ws');
 const PLAYERS = Number(__ENV.PLAYERS || 25);
 
 const joinMs = new Trend('join_ms', true);
@@ -33,13 +35,13 @@ export const options = {
     }
 };
 
-const jsonHeaders = { 'Content-Type': 'application/json', Origin: BASE };
+const jsonHeaders = { 'Content-Type': 'application/json', Origin: ORIGIN };
 const rnd = () => Math.random().toString(36).slice(2, 7).toUpperCase();
 
 export function setup() {
     const code = 'L' + rnd();
     const hostId = 'p_k6host_' + Date.now();
-    const r = http.post(`${BASE}/api/room/create`, JSON.stringify({
+    const r = http.post(`${API}/api/room/create`, JSON.stringify({
         roomCode: code, playerId: hostId, displayName: 'K6 Host', authVersion: 1
     }), { headers: jsonHeaders });
     check(r, { 'host created the room': (x) => x.status === 200 });
@@ -56,7 +58,7 @@ export default function (data) {
         sleep(Math.random() * 3);                                   // people do not all click at once
         playerId = `p_k6vu${vu}_${Date.now()}`;
         const t0 = Date.now();
-        const j = http.post(`${BASE}/api/room/join`, JSON.stringify({
+        const j = http.post(`${API}/api/room/join`, JSON.stringify({
             room: data.code, playerId, displayName: `K6 Player ${vu}`, authVersion: 1
         }), { headers: jsonHeaders });
         joinMs.add(Date.now() - t0);
@@ -69,7 +71,7 @@ export default function (data) {
     let voteConfirmed = false;
     let revealSeen = false;
 
-    const res = ws.connect(`${WS_BASE}/ws?room=${data.code}&playerId=${playerId}`, { headers: { Origin: BASE } }, (socket) => {
+    const res = ws.connect(`${WS_BASE}/ws?room=${data.code}&playerId=${playerId}`, { headers: { Origin: ORIGIN } }, (socket) => {
         socket.on('open', () => socket.send(JSON.stringify({ type: 'auth', payload: { token } })));
 
         socket.on('message', (raw) => {

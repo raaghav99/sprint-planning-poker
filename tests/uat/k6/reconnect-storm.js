@@ -39,12 +39,18 @@ export function setup() {
 // One session: authenticate, wait, then drop the connection
 function session(url, token, holdMs) {
     let gotState = false;
+    let stateAfterMs = 0;
+    const started = Date.now();
     const res = ws.connect(url, { headers: { Origin: ORIGIN } }, (socket) => {
         socket.on('open', () => socket.send(JSON.stringify({ type: 'auth', payload: { token } })));
-        socket.on('message', (raw) => { try { if (JSON.parse(raw).event === 'room_state') gotState = true; } catch (e) { /* ignore */ } });
+        socket.on('message', (raw) => {
+            try {
+                if (!gotState && JSON.parse(raw).event === 'room_state') { gotState = true; stateAfterMs = Date.now() - started; }
+            } catch (e) { /* ignore */ }
+        });
         socket.setTimeout(() => socket.close(), holdMs);
     });
-    return { ok: !!res && res.status === 101 && gotState, status: res && res.status };
+    return { ok: !!res && res.status === 101 && gotState, status: res && res.status, stateAfterMs };
 }
 
 export default function (data) {
@@ -64,9 +70,11 @@ export default function (data) {
         const t0 = Date.now();
         const rj = http.post(`${API}/api/room/join`, JSON.stringify({ room: data.code, playerId: id, displayName: `Storm ${vu}`, authVersion: 1, token }), { headers });
         if (rj.status === 429) throttled.add(1);
+        const joinMs = Date.now() - t0;
         const again = rj.status === 200 ? session(url, token, 2500) : { ok: false };
         if (again.status === 429) throttled.add(1);
-        rejoinMs.add(Date.now() - t0);
+        // time until the person is back in the room: the rejoin request + the socket delivering the room state
+        rejoinMs.add(joinMs + (again.stateAfterMs || 0));
         if (again.ok) reconnectOk.add(1); else failed.add(1);
     }
 }

@@ -7,8 +7,8 @@
 import {
     pokerState, saveSession, clearSession, rememberSeat, getSeat, forgetSeat,
     setLastRoom, touchLastRoom, clearLastRoom
-} from './state.js?v=2.3.0';
-import { incrementUsage } from './usage.js?v=2.3.0';
+} from './state.js?v=2.3.1';
+import { incrementUsage } from './usage.js?v=2.3.1';
 
 // Default worker URL or relative route if hosted on worker
 const DEFAULT_WORKER_URL = window.WORKER_URL || 'https://sprint-poker-worker.temp66081.workers.dev';

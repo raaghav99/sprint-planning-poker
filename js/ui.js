@@ -2,11 +2,11 @@
  * Standalone Sprint Planning Poker - UI Controller & Event Handlers
  */
 
-import { pokerState, DECKS, getResumeTarget, getSeat, clearSession, clearLastRoom } from './state.js?v=2.3.0';
-import { PokerNetworkController } from './network.js?v=2.3.0';
-import { PokerEngine } from './engine.js?v=2.3.0';
-import { showQRCodeModal } from './qrcode.js?v=2.3.0';
-import { escapeHtml, isValidRoomCode } from './util.js?v=2.3.0';
+import { pokerState, DECKS, getResumeTarget, getSeat, clearSession, clearLastRoom } from './state.js?v=2.3.1';
+import { PokerNetworkController } from './network.js?v=2.3.1';
+import { PokerEngine } from './engine.js?v=2.3.1';
+import { showQRCodeModal } from './qrcode.js?v=2.3.1';
+import { escapeHtml, isValidRoomCode } from './util.js?v=2.3.1';
 
 export class PokerUIController {
     constructor() {

@@ -3,7 +3,7 @@
  * Uses QR Code API with offline fallback image renderer
  */
 
-import { escapeHtml } from './util.js?v=2.3.0';
+import { escapeHtml } from './util.js?v=2.3.1';
 
 /**
  * Build a QR code locally (vendored qrcode-generator, loaded as window.qrcode) so the room

@@ -66,7 +66,7 @@ test('nobody can vote as someone else or peek at hidden votes', async ({ browser
         await expect(host.page.locator('#players-grid .poker-card-back.voted')).toHaveCount(1);
 
         const players = await host.page.evaluate(async () => {
-            const { pokerState } = await import(new URL('js/state.js?v=2.3.0', document.baseURI).href);
+            const { pokerState } = await import(new URL('js/state.js?v=2.3.1', document.baseURI).href);
             return pokerState.get().players.map((p) => ({ id: p.id, name: p.displayName }));
         });
         const bobId = players.find((p) => p.name === 'Bob').id;

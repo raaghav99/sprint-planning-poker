@@ -105,6 +105,8 @@ body {
 /* App Header */
 .app-header {
     display: flex;
+    flex-wrap: wrap;            /* on narrow screens the room badge and buttons drop under the logo */
+    gap: 8px 12px;
     justify-content: space-between;
     align-items: center;
     padding: 14px 28px;
@@ -721,5 +723,23 @@ body {
 @media (max-width: 480px) {
     #select-deck {
         max-width: 58vw;
+    }
+}
+
+/* Very small phones (320px): everything in the header must fit on the screen */
+@media (max-width: 400px) {
+    .app-header {
+        padding: 10px 12px;
+    }
+    .brand-logo {
+        font-size: 1rem;
+        gap: 8px;
+    }
+    .room-badge-group {
+        width: 100%;
+        gap: 8px;
+    }
+    .room-badge {
+        padding: 4px 10px;
     }
 }

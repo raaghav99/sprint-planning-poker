@@ -2,8 +2,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const BASE = process.env.UAT_URL || 'https://sprint-poker-worker-uat.temp66081.workers.dev';
-const ORIGIN = new URL(BASE).origin;
+// BASE = where the PAGE lives, API = where the worker lives. On UAT they are the same address; on
+// production the page is on GitHub Pages and the API on Cloudflare (a different origin):
+//   UAT_URL=https://raaghav99.github.io/sprint-planning-poker  API_URL=https://sprint-poker-worker.temp66081.workers.dev
+const BASE = (process.env.UAT_URL || 'https://sprint-poker-worker-uat.temp66081.workers.dev').replace(/\/$/, '');
+const API = (process.env.API_URL || BASE).replace(/\/$/, '');
+const ORIGIN = new URL(BASE).origin;                 // the Origin header a browser on the page sends
 const RECORDINGS = path.join(__dirname, '..', 'recordings');
 
 // The server allows 10 room creations per minute per IP: keep every create ~7s apart.
@@ -108,5 +112,5 @@ async function saveVideo(user, fileName) {
 }
 
 module.exports = {
-    BASE, ORIGIN, RECORDINGS, paceCreate, newUser, newTab, openSite, createRoom, joinRoom, vote, seatNames, caption, pause, saveVideo
+    BASE, API, ORIGIN, RECORDINGS, paceCreate, newUser, newTab, openSite, createRoom, joinRoom, vote, seatNames, caption, pause, saveVideo
 };

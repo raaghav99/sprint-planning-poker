@@ -89,6 +89,27 @@ test('deck change: T-shirt sizes, votes are cleared and everyone gets the new ca
     } finally { await closeAll(host, bob); }
 });
 
+test('deck change AFTER reveal: the round is votable again (not stuck locked)', async ({ browser }) => {
+    const host = await H.newUser(browser, 'host');
+    const bob = await H.newUser(browser, 'bob');
+    try {
+        const code = await H.createRoom(host.page, 'Hana');
+        await H.joinRoom(bob.page, code, 'Bob');
+        await H.vote(bob.page, '5');
+        await host.page.click('#btn-reveal');
+        await expect(host.page.locator('#players-grid')).toContainText('5');
+
+        await host.page.selectOption('#select-deck', 'tshirt');
+        await expect(bob.page.locator('.deck-card').first()).toHaveText('XS');
+        await expect(bob.page.locator('.deck-card.selected')).toHaveCount(0);       // old vote is gone
+        await H.vote(bob.page, 'M');                                                 // used to be refused: round stayed revealed
+        await expect(host.page.locator('#players-grid .poker-card-back.voted')).toHaveCount(1);
+        await expect(host.page.locator('#btn-reveal')).toBeVisible();                // back in the voting phase
+        await host.page.click('#btn-reveal');
+        await expect(host.page.locator('#players-grid')).toContainText('M');
+    } finally { await closeAll(host, bob); }
+});
+
 test('voting details: clicking your card again clears the vote; Clear / Re-vote resets everyone', async ({ browser }) => {
     const host = await H.newUser(browser, 'host');
     const bob = await H.newUser(browser, 'bob');

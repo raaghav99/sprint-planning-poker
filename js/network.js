@@ -112,15 +112,22 @@ export class PokerNetworkController {
                 ...(this._token ? { token: this._token } : {})
             });
             if (stale()) return;
+            const me = data.state && (data.state.players || []).find((p) => p.id === this._playerId);
+            const seatName = (me && me.displayName) || st.displayName;
             if (data.token) {
                 this._token = data.token;
-                rememberSeat(roomCode, { playerId: this._playerId, token: this._token, displayName: st.displayName });
+                rememberSeat(roomCode, { playerId: this._playerId, token: this._token, displayName: seatName });
+            }
+            if (me && me.displayName && me.displayName !== st.displayName) {
+                pokerState.set({ displayName: me.displayName });
+                saveSession({ roomCode, displayName: me.displayName });
             }
         } catch (e) {
             if (stale()) return;
             // An Origin block or a throttle says nothing about our seat: keep it and keep retrying.
             if (e.status === 429 && this.onError) this.onError(e.message);
-            const seatProblem = e.code !== 'origin_blocked' && e.status !== 429
+            // name_in_use is a rename clash, not a lost seat: keep the seat and keep the socket going.
+            const seatProblem = e.code !== 'origin_blocked' && e.code !== 'name_in_use' && e.status !== 429
                 && (e.status === 404 || e.status === 403 || e.status === 409);
             if (seatProblem) {
                 forgetSeat(roomCode);
@@ -297,6 +304,9 @@ export class PokerNetworkController {
     _enterRoom(data, roomCode, displayName) {
         const myId = pokerState.get().myPeerId;
         const st = data.state;
+        // The server may have given us a variant of the typed name (e.g. "Bob 2"): use what it stored.
+        const mine = (st.players || []).find((p) => p.id === myId);
+        if (mine && mine.displayName) displayName = mine.displayName;
         saveSession({ roomCode, displayName });
         rememberSeat(roomCode, { playerId: myId, token: this._token, displayName });
         setLastRoom({ roomCode, displayName });

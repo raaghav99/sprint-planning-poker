@@ -518,7 +518,7 @@ export class PokerRoom {
             if (!this.checkToken(newId, body.token)) {
                 return this.json({ error: 'Player id is already in use', code: 'own_seat' }, 403);
             }
-            this.tokens.delete(newId);
+            // The reservation is replaced by the new token only after every check below passes.
         }
 
         let seat = null;
@@ -697,6 +697,7 @@ export class PokerRoom {
                 if (deckType !== this.deckType) {
                     this.deckType = deckType;
                     this.votes.clear(); // old cards are meaningless in the new deck
+                    this.revealed = false; // a cleared round must be votable again
                 }
                 break;
             }
